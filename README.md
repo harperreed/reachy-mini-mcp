@@ -6,6 +6,8 @@ This MCP server lets AI systems control [Pollen Robotics' Reachy Mini](https://w
 
 7 tools. 30 minutes to first demo. Zero robotics expertise required.
 
+https://reachy-mini-mcp-969sxyq.gamma.site/
+
 ---
 
 ## For AI Systems
