@@ -128,82 +128,78 @@ EXPRESSIONS = {
 
 
 # ==============================================================================
-# CONNECTION MANAGEMENT
+# DAEMON HTTP CLIENT
 # ==============================================================================
+# All robot control flows through the daemon's REST API on the wireless robot.
+# No zenoh / no in-process SDK — keeps the MCP host machine independent.
 
-_robot_instance = None
+DAEMON_URL = os.environ.get("REACHY_DAEMON_URL", "http://reachy-mini.local:8000/api")
+
+
+def _daemon_post(path: str, json: Optional[dict] = None, timeout: float = 30.0):
+    """POST to the daemon API. Returns parsed JSON on 2xx, raises with daemon message on error."""
+    import httpx
+    try:
+        r = httpx.post(f"{DAEMON_URL}{path}", json=json, timeout=timeout)
+        r.raise_for_status()
+        return r.json() if r.content else None
+    except httpx.ConnectError:
+        raise RuntimeError(f"Cannot connect to daemon at {DAEMON_URL}. Is the robot powered on and on the network?")
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"Daemon {e.response.status_code} on POST {path}: {e.response.text}")
+
+
+def _daemon_get(path: str, timeout: float = 10.0):
+    """GET from the daemon API."""
+    import httpx
+    try:
+        r = httpx.get(f"{DAEMON_URL}{path}", timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+    except httpx.ConnectError:
+        raise RuntimeError(f"Cannot connect to daemon at {DAEMON_URL}.")
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"Daemon {e.response.status_code} on GET {path}: {e.response.text}")
+
+
+def _goto(
+    z_m: float = 0.0,
+    roll_deg: float = 0.0,
+    pitch_deg: float = 0.0,
+    yaw_deg: float = 0.0,
+    antennas_deg: Optional[tuple] = None,
+    duration: float = 1.0,
+    interpolation: str = "minjerk",
+) -> dict:
+    """Issue /api/move/goto with degree-to-radian + meter unit conversions."""
+    body: dict = {
+        "head_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": z_m,
+            "roll": math.radians(roll_deg),
+            "pitch": math.radians(pitch_deg),
+            "yaw": math.radians(yaw_deg),
+        },
+        "duration": duration,
+        "interpolation": interpolation,
+    }
+    if antennas_deg is not None:
+        body["antennas"] = [math.radians(antennas_deg[0]), math.radians(antennas_deg[1])]
+    return _daemon_post("/move/goto", json=body)
+
 
 def get_robot():
-    """
-    Get or create robot connection.
-    Uses lazy initialization - connects on first tool call.
-    Uses no_media backend for headless simulation compatibility.
-    """
-    global _robot_instance
-    if _robot_instance is None:
-        try:
-            from reachy_mini import ReachyMini
-            # Use 'default' for full media (audio + camera) - requires real hardware
-            # Use 'default_no_video' for audio only (simulator compatible)
-            # Use 'no_media' for headless (no audio or camera)
-            backend = os.environ.get("REACHY_MEDIA_BACKEND", "default_no_video")
-            _robot_instance = ReachyMini(media_backend=backend)
-            _robot_instance.__enter__()
-        except ImportError:
-            raise RuntimeError(
-                "reachy-mini SDK not installed. Run: pip install reachy-mini[mujoco]"
-            )
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not connect to Reachy Mini. Is the daemon running? Error: {e}"
-            )
-    return _robot_instance
+    """Stub for tools that haven't been ported to REST yet (speak/listen/snap)."""
+    raise RuntimeError(
+        "This tool (audio or camera) requires the SDK in-process; not yet "
+        "implemented in REST-only mode. Move/look/show/discover/rest work over REST."
+    )
 
 
 def cleanup_robot():
-    """Clean up robot connection on shutdown."""
-    global _robot_instance
-    if _robot_instance is not None:
-        try:
-            _robot_instance.__exit__(None, None, None)
-        except Exception:
-            pass  # Best effort cleanup on shutdown
-        _robot_instance = None
-
-
-# ==============================================================================
-# HELPER FUNCTIONS
-# ==============================================================================
-
-
-def create_head_pose_array(z: float = 0, roll: float = 0, pitch: float = 0, yaw: float = 0):
-    """
-    Create head pose transformation matrix.
-
-    Args:
-        z: Vertical position offset
-        roll: Tilt left/right in degrees (positive = right ear toward shoulder)
-        pitch: Nod up/down in degrees (positive = looking up)
-        yaw: Turn left/right in degrees (positive = looking right)
-
-    Returns:
-        4x4 numpy transformation matrix
-    """
-    from reachy_mini.utils import create_head_pose
-    return create_head_pose(z=z, roll=roll, pitch=pitch, yaw=yaw, degrees=True)
-
-
-def get_interpolation_method(method: str):
-    """Get interpolation enum from string."""
-    from reachy_mini.utils.interpolation import InterpolationTechnique
-
-    methods = {
-        "linear": InterpolationTechnique.LINEAR,
-        "minjerk": InterpolationTechnique.MIN_JERK,
-        "ease_in_out": InterpolationTechnique.EASE_IN_OUT,
-        "cartoon": InterpolationTechnique.CARTOON,
-    }
-    return methods.get(method, InterpolationTechnique.MIN_JERK)
+    """No-op in REST-only mode (kept for atexit hook compatibility)."""
+    return
 
 
 # ==============================================================================
@@ -216,29 +212,20 @@ def _do_express(emotion: str) -> str:
         return f"Unknown emotion: {emotion}. Available: {list(EXPRESSIONS.keys())}"
 
     expr = EXPRESSIONS[emotion]
-    robot = get_robot()
+    head = expr["head"]
+    antennas = expr["antennas"]
 
     try:
-        head = expr["head"]
-        antennas = expr["antennas"]
-
-        # Convert antenna degrees to radians
-        antenna_radians = [math.radians(a) for a in antennas]
-
-        robot.goto_target(
-            head=create_head_pose_array(
-                z=head["z"],
-                roll=head["roll"],
-                pitch=head["pitch"],
-                yaw=head["yaw"]
-            ),
-            antennas=antenna_radians,
+        _goto(
+            z_m=head["z"],
+            roll_deg=head["roll"],
+            pitch_deg=head["pitch"],
+            yaw_deg=head["yaw"],
+            antennas_deg=(antennas[0], antennas[1]),
             duration=expr["duration"],
-            method=get_interpolation_method(expr["method"])
+            interpolation=expr["method"],
         )
-
         return f"Expressed: {emotion}"
-
     except Exception as e:
         return f"Expression failed: {e}"
 
@@ -314,23 +301,16 @@ def look(
     Returns:
         Confirmation
     """
-    # Clamp values to safe ranges
-    roll = max(-45, min(45, roll))
-    pitch = max(-30, min(30, pitch))
-    yaw = max(-90, min(90, yaw))
+    # Clamp values to safe ranges (daemon also clamps; this is belt-and-braces)
+    roll = max(-40, min(40, roll))
+    pitch = max(-40, min(40, pitch))
+    yaw = max(-180, min(180, yaw))
     z = max(-20, min(20, z))
     duration = max(0.1, min(5.0, duration))
 
-    robot = get_robot()
-
     try:
-        robot.goto_target(
-            head=create_head_pose_array(z=z, roll=roll, pitch=pitch, yaw=yaw),
-            duration=duration,
-            method=get_interpolation_method("minjerk")
-        )
+        _goto(z_m=z, roll_deg=roll, pitch_deg=pitch, yaw_deg=yaw, duration=duration)
         return f"Head positioned: roll={roll}°, pitch={pitch}°, yaw={yaw}°, z={z}"
-
     except Exception as e:
         return f"Movement failed: {e}"
 
@@ -756,13 +736,12 @@ def rest(mode: Literal["neutral", "sleep", "wake"] = "neutral") -> str:
     Returns:
         Confirmation
     """
-    robot = get_robot()
     try:
         if mode == "sleep":
-            robot.goto_sleep()
+            _daemon_post("/move/play/goto_sleep")
             return "Robot sleeping"
         elif mode == "wake":
-            robot.wake_up()
+            _daemon_post("/move/play/wake_up")
             return "Robot awakened"
         else:  # neutral
             return _do_express("neutral")
@@ -773,8 +752,6 @@ def rest(mode: Literal["neutral", "sleep", "wake"] = "neutral") -> str:
 # ==============================================================================
 # RECORDED MOVES (Pollen's emotion/dance libraries)
 # ==============================================================================
-
-DAEMON_URL = os.environ.get("REACHY_DAEMON_URL", "http://localhost:8321/api")
 
 
 def _wait_for_moves_complete(timeout: float = 30.0, poll_interval: float = 0.1) -> bool:
@@ -835,7 +812,7 @@ def discover(library: Literal["emotions", "dances"] = "emotions") -> str:
         moves = response.json()
         return f"Available {library} ({len(moves)}): {', '.join(sorted(moves))}"
     except httpx.ConnectError:
-        return "Cannot connect to daemon. Is it running on localhost:8321?"
+        return "Cannot connect to daemon. Is it running at $REACHY_DAEMON_URL?"
     except Exception as e:
         return f"Failed to list moves: {e}"
 
@@ -859,7 +836,7 @@ def _do_play_move(move_name: str, library: str = "emotions") -> str:
         result = response.json()
         return f"Playing: {move_name} (uuid: {result.get('uuid', 'unknown')})"
     except httpx.ConnectError:
-        return "Cannot connect to daemon. Is it running on localhost:8321?"
+        return "Cannot connect to daemon. Is it running at $REACHY_DAEMON_URL?"
     except Exception as e:
         return f"Failed to play move: {e}"
 

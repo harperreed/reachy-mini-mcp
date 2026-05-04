@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "reachy-mini-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server for Reachy Mini robot"
 authors = ["Jack C Crawford <jack@mvara.ai>", "Eclipse <eclipse@mvara.ai>", "Regenera <regenera@mvara.ai>"]
 readme = "README.md"
