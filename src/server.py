@@ -650,52 +650,44 @@ def speak(
 
 
 def _do_listen(duration: float) -> str:
-    """Internal helper - capture and transcribe audio."""
-    import time
-    import io
-    import wave
-    import numpy as np
+    """Capture audio from the robot's mic over SSH, transcribe via Deepgram.
 
-    duration = max(1, min(30, duration))
-    robot = get_robot()
+    Mirrors snap()'s release/ssh/acquire pattern. Uses arecord on the robot
+    to capture mono 16-bit/16kHz WAV (Deepgram-friendly), streamed over ssh
+    stdout so we don't need a temp file on the robot.
+    """
+    import subprocess
+    import httpx
 
-    # Record with proper cleanup
-    robot.media.start_recording()
+    duration = int(max(1, min(30, duration)))
+    ssh_target = os.environ.get("REACHY_SSH_TARGET", "pollen@reachy-mini.local")
+
     try:
-        time.sleep(duration)
-        audio_data = robot.media.get_audio_sample()
-    finally:
-        robot.media.stop_recording()
-
-    if audio_data is not None and len(audio_data) > 0:
-        # Convert numpy array to WAV bytes for Deepgram
-        sample_rate = robot.media.get_input_audio_samplerate()
-        channels = robot.media.get_input_channels()
-
-        # Create WAV file in memory
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, 'wb') as wav_file:
-            wav_file.setnchannels(channels if channels > 0 else 1)
-            wav_file.setsampwidth(2)  # 16-bit
-            wav_file.setframerate(sample_rate if sample_rate > 0 else 16000)
-
-            # Convert float32 to int16
-            if isinstance(audio_data, np.ndarray):
-                if audio_data.dtype == np.float32:
-                    audio_int16 = (audio_data * 32767).astype(np.int16)
-                else:
-                    audio_int16 = audio_data.astype(np.int16)
-                wav_file.writeframes(audio_int16.tobytes())
-            else:
-                wav_file.writeframes(audio_data)
-
-        wav_bytes = wav_buffer.getvalue()
-
-        # Transcribe via Deepgram STT
-        transcript = speech_to_text(wav_bytes)
-        return transcript if transcript else ""
-    else:
+        httpx.post(f"{DAEMON_URL}/media/release", timeout=10.0).raise_for_status()
+    except Exception:
         return ""
+
+    try:
+        result = subprocess.run(
+            [
+                "ssh", "-o", "BatchMode=yes", ssh_target,
+                f"arecord -D plughw:0 -f S16_LE -r 16000 -c 1 -d {duration} "
+                f"-t wav - 2>/dev/null",
+            ],
+            capture_output=True,
+            timeout=duration + 10,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return ""
+        wav_bytes = result.stdout
+        return speech_to_text(wav_bytes) or ""
+    except Exception:
+        return ""
+    finally:
+        try:
+            httpx.post(f"{DAEMON_URL}/media/acquire", timeout=10.0)
+        except Exception:
+            pass
 
 
 @mcp.tool()
