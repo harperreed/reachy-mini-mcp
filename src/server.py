@@ -733,23 +733,53 @@ def snap() -> str:
     Returns:
         Base64-encoded image data (JPEG)
     """
-    robot = get_robot()
+    import subprocess
+    import httpx
+
+    ssh_target = os.environ.get("REACHY_SSH_TARGET", "pollen@reachy-mini.local")
+    width = int(os.environ.get("REACHY_SNAP_WIDTH", "1280"))
+    height = int(os.environ.get("REACHY_SNAP_HEIGHT", "720"))
+    warmup_ms = int(os.environ.get("REACHY_SNAP_WARMUP_MS", "2000"))
+
+    # Step 1: ask daemon to release the camera so rpicam can grab it.
+    try:
+        httpx.post(f"{DAEMON_URL}/media/release", timeout=10.0).raise_for_status()
+    except Exception as e:
+        return f"Capture failed: could not release camera ({e})"
 
     try:
-        frame = robot.media.get_frame()
+        # Step 2: capture one frame on the robot, stream JPEG bytes over ssh stdout.
+        result = subprocess.run(
+            [
+                "ssh", "-o", "BatchMode=yes", ssh_target,
+                f"rpicam-jpeg --output - --width {width} --height {height} "
+                f"--nopreview -t {warmup_ms} 2>/dev/null",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return (
+                f"Capture failed: ssh/rpicam-jpeg exit {result.returncode}. "
+                f"Verify ssh access to {ssh_target} and rpicam-jpeg on the robot. "
+                f"stderr: {result.stderr.decode('utf-8', errors='replace')[:200]}"
+            )
+        encoded = base64.b64encode(result.stdout).decode("utf-8")
+        return f"data:image/jpeg;base64,{encoded}"
 
-        if frame is not None:
-            import cv2
-            _, buffer = cv2.imencode('.jpg', frame)
-            encoded = base64.b64encode(buffer).decode('utf-8')
-            return f"data:image/jpeg;base64,{encoded}"
-        else:
-            return "No frame captured"
-
-    except ImportError:
-        return "OpenCV not available for image encoding"
+    except subprocess.TimeoutExpired:
+        return "Capture failed: rpicam-jpeg timed out (camera busy or unreachable)"
+    except FileNotFoundError:
+        return "Capture failed: ssh command not found on this host"
     except Exception as e:
-        return f"Vision failed: {e}"
+        return f"Capture failed: {e}"
+
+    finally:
+        # Step 3: ALWAYS hand the camera back to the daemon, even on error.
+        try:
+            httpx.post(f"{DAEMON_URL}/media/acquire", timeout=10.0)
+        except Exception:
+            pass
 
 
 @mcp.tool()
