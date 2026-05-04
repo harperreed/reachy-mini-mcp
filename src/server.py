@@ -189,11 +189,40 @@ def _goto(
     return _daemon_post("/move/goto", json=body)
 
 
+def _upload_and_play(audio_path: str) -> None:
+    """Upload an audio file to the robot and trigger playback over REST.
+
+    Returns when playback has been *started* (the daemon plays async; there is
+    no REST endpoint to poll sound playback completion, so callers that need to
+    wait should sleep for an estimated duration).
+    """
+    import httpx
+    filename = os.path.basename(audio_path)
+    with open(audio_path, "rb") as f:
+        r = httpx.post(
+            f"{DAEMON_URL}/media/sounds/upload",
+            files={"file": (filename, f, "audio/mpeg")},
+            timeout=30.0,
+        )
+        r.raise_for_status()
+    r = httpx.post(
+        f"{DAEMON_URL}/media/play_sound",
+        json={"file": filename},
+        timeout=10.0,
+    )
+    r.raise_for_status()
+
+
+def _estimate_speech_duration(text: str) -> float:
+    """Rough estimate of TTS duration. ~15 chars/sec is conservative for Aura/Grok."""
+    return max(1.0, len(text) / 15.0)
+
+
 def get_robot():
-    """Stub for tools that haven't been ported to REST yet (speak/listen/snap)."""
+    """Stub for tools that haven't been ported to REST yet (listen/snap)."""
     raise RuntimeError(
-        "This tool (audio or camera) requires the SDK in-process; not yet "
-        "implemented in REST-only mode. Move/look/show/discover/rest work over REST."
+        "This tool (mic capture or camera) requires the SDK in-process; not yet "
+        "implemented in REST-only mode."
     )
 
 
@@ -544,14 +573,22 @@ def speak(
     Returns:
         Confirmation, plus transcription if listen_after > 0
     """
-    robot = get_robot()
-
+    import time
     result_parts = []
+
+    def _say(content: str) -> float:
+        """TTS, upload, play, return estimated duration in seconds."""
+        audio_path = text_to_speech(content, voice)
+        try:
+            _upload_and_play(audio_path)
+        finally:
+            os.unlink(audio_path)
+        return _estimate_speech_duration(content)
 
     try:
         # Check if it's a file path (no choreography support for raw audio)
         if text.endswith(('.wav', '.mp3', '.ogg')):
-            robot.media.play_sound(text)
+            _upload_and_play(text)
             result_parts.append(f"Played audio: {text}")
 
         # Check for embedded moves
@@ -575,12 +612,9 @@ def speak(
                             moves_triggered.append(pending_move)
                             pending_move = None
 
-                        # Speak this chunk with proper temp file cleanup
-                        audio_path = text_to_speech(content, voice)
-                        try:
-                            robot.media.play_sound(audio_path)
-                        finally:
-                            os.unlink(audio_path)
+                        # Speak this chunk; block for estimated duration so the
+                        # next chunk doesn't trample this one's playback.
+                        time.sleep(_say(content))
                         speech_parts.append(content)
 
             # Fire any trailing move (if text ends with a move marker)
@@ -592,11 +626,7 @@ def speak(
 
         else:
             # Simple speech - no choreography
-            audio_path = text_to_speech(text, voice)
-            try:
-                robot.media.play_sound(audio_path)
-            finally:
-                os.unlink(audio_path)
+            time.sleep(_say(text))
             result_parts.append(f"Spoke: {text}")
 
         # Listen after speaking if requested
