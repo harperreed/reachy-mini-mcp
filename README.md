@@ -52,26 +52,38 @@ Use `discover()` to enumerate them.
 
 ## Quick Start
 
+System dependencies first (macOS):
+
 ```bash
-# 1. System dependencies (macOS)
 brew install gstreamer gst-plugins-good gst-plugins-bad gst-plugins-ugly \
              gst-libav gst-plugin-webrtc ffmpeg pkg-config git-lfs
 git lfs install
+```
 
-# 2. Install
+Then pick a flow:
+
+### Run via uvx (no clone)
+
+```bash
+ELEVENLABS_API_KEY=your_key_here \
+  uvx --from git+https://github.com/harperreed/reachy-mini-mcp reachy-mini-mcp
+```
+
+uvx fetches the repo, builds the package into a throwaway venv, and starts the stdio server. Best for hosts (Claude Desktop, Claude Code) that pass env vars via their MCP config block.
+
+### Run from a local clone
+
+```bash
+git clone https://github.com/harperreed/reachy-mini-mcp
 cd reachy-mini-mcp
 uv sync
-
-# 3. ElevenLabs key (required for speak)
 echo 'ELEVENLABS_API_KEY=your_key_here' > .env
-
-# 4. Run the MCP server (stdio)
 uv run reachy-mini-mcp
 ```
 
-`main()` calls `load_dotenv()` at startup, so any `.env` in the working directory is auto-loaded. You can also export the vars in your shell or pass them via the MCP host's config block.
+`main()` calls `load_dotenv()` at startup, so any `.env` in the working directory is auto-loaded. The clone path is the right one when you want `.env` files, the test suite, or to hack on the code.
 
-The daemon must be reachable. Default URL is `http://reachy-mini.local:8321/api`. Override with `REACHY_DAEMON_URL` for a local simulator or a different host.
+The daemon must be reachable either way. Default URL is `http://reachy-mini.local:8321/api`. Override with `REACHY_DAEMON_URL` for a local simulator or a different host.
 
 ## Architecture
 
@@ -93,7 +105,27 @@ Motors and state ride Zenoh. Camera frames and speaker audio ride WebRTC. Eleven
 
 ### Claude Desktop
 
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
+`~/Library/Application Support/Claude/claude_desktop_config.json`.
+
+uvx (no clone):
+
+```json
+{
+  "mcpServers": {
+    "reachy-mini": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/harperreed/reachy-mini-mcp",
+        "reachy-mini-mcp"
+      ],
+      "env": { "ELEVENLABS_API_KEY": "your_key_here" }
+    }
+  }
+}
+```
+
+Local clone:
 
 ```json
 {
@@ -101,15 +133,23 @@ Motors and state ride Zenoh. Camera frames and speaker audio ride WebRTC. Eleven
     "reachy-mini": {
       "command": "uv",
       "args": ["--directory", "/path/to/reachy-mini-mcp", "run", "reachy-mini-mcp"],
-      "env": {
-        "ELEVENLABS_API_KEY": "your_key_here"
-      }
+      "env": { "ELEVENLABS_API_KEY": "your_key_here" }
     }
   }
 }
 ```
 
 ### Claude Code
+
+uvx (no clone):
+
+```bash
+claude mcp add reachy-mini \
+  --env ELEVENLABS_API_KEY=your_key_here \
+  -- uvx --from git+https://github.com/harperreed/reachy-mini-mcp reachy-mini-mcp
+```
+
+Local clone:
 
 ```bash
 claude mcp add reachy-mini \
