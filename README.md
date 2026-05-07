@@ -83,14 +83,14 @@ uv run reachy-mini-mcp
 
 `main()` calls `load_dotenv()` at startup, so any `.env` in the working directory is auto-loaded. The clone path is the right one when you want `.env` files, the test suite, or to hack on the code.
 
-The daemon must be reachable either way. Default URL is `http://reachy-mini.local:8321/api`. Override with `REACHY_DAEMON_URL` for a local simulator or a different host.
+The daemon must be reachable either way. Default URL is `http://reachy-mini.local:8000/api`. Override with `REACHY_DAEMON_URL` for a local simulator or a different host.
 
 ## Architecture
 
 ```
 Laptop (macOS)                       Robot (Pi CM4)
   Claude / ChatGPT / etc                reachy_mini daemon
-       │ stdio                            :8321 REST  (motors, moves, state)
+       │ stdio                            :8000 REST  (motors, moves, state)
   reachy-mini-mcp                         :7447 Zenoh (motors, state pub/sub)
     ├─ Zenoh peer ─────────────────►      :8443 WebRTC signaling
     ├─ WebRTC client (frames in)
@@ -164,7 +164,7 @@ claude mcp add reachy-mini \
 | `ELEVENLABS_API_KEY` | Yes (for `speak`) | – | ElevenLabs TTS auth |
 | `ELEVENLABS_VOICE_ID` | No | `JBFqnCBsd6RMkjVDRZzb` (Rachel) | Default voice |
 | `ELEVENLABS_MODEL` | No | `eleven_flash_v2_5` | Model id |
-| `REACHY_DAEMON_URL` | No | `http://reachy-mini.local:8321/api` | Daemon REST base URL |
+| `REACHY_DAEMON_URL` | No | `http://reachy-mini.local:8000/api` | Daemon REST base URL |
 | `REACHY_ZENOH_ENDPOINT` | No | – | Manual Zenoh endpoint when multicast is blocked, e.g. `tcp/192.168.1.42:7447` |
 
 ## Requirements

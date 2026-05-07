@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import numpy as np
 
-DEFAULT_DAEMON_URL = "http://reachy-mini.local:8321/api"
+DEFAULT_DAEMON_URL = "http://reachy-mini.local:8000/api"
 _AUDIO_CHUNK_SIZE = 960  # 20 ms at 48 kHz, padded to actual rate at runtime
 
 
