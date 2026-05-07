@@ -63,11 +63,13 @@ cd reachy-mini-mcp
 uv sync
 
 # 3. ElevenLabs key (required for speak)
-export ELEVENLABS_API_KEY=your_key_here
+echo 'ELEVENLABS_API_KEY=your_key_here' > .env
 
 # 4. Run the MCP server (stdio)
 uv run reachy-mini-mcp
 ```
+
+`main()` calls `load_dotenv()` at startup, so any `.env` in the working directory is auto-loaded. You can also export the vars in your shell or pass them via the MCP host's config block.
 
 The daemon must be reachable. Default URL is `http://reachy-mini.local:8321/api`. Override with `REACHY_DAEMON_URL` for a local simulator or a different host.
 
