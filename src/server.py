@@ -74,15 +74,18 @@ def show(
         "sleepy", "surprised", "focused",
     ] = "neutral",
     move: str = "",
+    library: Literal["emotions", "dances"] = "emotions",
 ) -> str:
     """Express an emotion through movement.
 
     Use ``emotion`` for 12 fast built-in expressions, or ``move`` for one of the
-    80+ recorded moves from Pollen's HuggingFace library. ``move`` overrides
-    ``emotion`` if both are passed. Use ``discover()`` to list available moves.
+    recorded moves from Pollen's HuggingFace library. ``move`` overrides
+    ``emotion`` if both are passed. ``library`` selects which dataset to play
+    from (``"emotions"`` ≈ 81 moves, ``"dances"`` ≈ 19 moves). Use
+    ``discover(library)`` to list available moves.
     """
     if move:
-        return _do_play_move(move)
+        return _do_play_move(move, library=library)
     return _do_show_emotion(emotion)
 
 
