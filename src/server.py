@@ -213,6 +213,9 @@ def speak(text: str, voice_id: str = "") -> str:
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv()
     mcp.run()
 
 
