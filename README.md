@@ -91,15 +91,15 @@ The daemon must be reachable either way. Default URL is `http://reachy-mini.loca
 Laptop (macOS)                       Robot (Pi CM4)
   Claude / ChatGPT / etc                reachy_mini daemon
        │ stdio                            :8000 REST  (motors, moves, state)
-  reachy-mini-mcp                         :7447 Zenoh (motors, state pub/sub)
-    ├─ Zenoh peer ─────────────────►      :8443 WebRTC signaling
-    ├─ WebRTC client (frames in)
-    ├─ WebRTC client (PCM out) ────►      libcamera → frames
-    ├─ ElevenLabs HTTP (MP3 in)           webrtcsink → speaker
+  reachy-mini-mcp                         :8443 WebRTC signaling
+    ├─ httpx → daemon REST ────────►      libcamera → frames
+    ├─ WebRTC client (frames in)          webrtcsink → speaker
+    ├─ WebRTC client (PCM out) ────►
+    ├─ ElevenLabs HTTP (MP3 in)
     └─ pydub/ffmpeg (MP3 → PCM)
 ```
 
-Motors and state ride Zenoh. Camera frames and speaker audio ride WebRTC. ElevenLabs returns MP3, which is decoded to mono float32 at the SDK's runtime sample rate and pushed via `media.push_audio_sample()`.
+Motors and recorded moves go over the daemon's REST API. Camera frames and speaker audio ride WebRTC, signalled directly to the robot host on `:8443` — the SDK's Zenoh layer is bypassed because it requires multicast scouting that most managed networks block. ElevenLabs returns MP3, which is decoded to mono float32 at the SDK's runtime sample rate and pushed via `media.push_audio_sample()`.
 
 ## MCP Config
 
@@ -165,7 +165,7 @@ claude mcp add reachy-mini \
 | `ELEVENLABS_VOICE_ID` | No | `JBFqnCBsd6RMkjVDRZzb` (Rachel) | Default voice |
 | `ELEVENLABS_MODEL` | No | `eleven_flash_v2_5` | Model id |
 | `REACHY_DAEMON_URL` | No | `http://reachy-mini.local:8000/api` | Daemon REST base URL |
-| `REACHY_ZENOH_ENDPOINT` | No | – | Manual Zenoh endpoint when multicast is blocked, e.g. `tcp/192.168.1.42:7447` |
+| `REACHY_ROBOT_HOST` | No | hostname from `REACHY_DAEMON_URL` | WebRTC signalling host (port 8443). Set this if the robot's REST and media live on different hostnames. |
 
 ## Requirements
 
@@ -189,7 +189,7 @@ uv run ruff check src tests
 
 - **`gst-inspect-1.0 webrtc` returns nothing** — the WebRTC plugin pack didn't install. Re-run the brew line above; you need `gst-plugin-webrtc` plus the `bad` plugins.
 - **`uv sync` fails on the `reachy-mini` git dependency** — install `git-lfs` and run `git lfs install` once. The reachy-mini repo stores recorded moves under LFS.
-- **Robot can't be reached on Zenoh** — your network probably blocks multicast. Set `REACHY_ZENOH_ENDPOINT=tcp/<robot-ip>:7447` and restart the server.
+- **`snap()` or `speak()` fails with "failed to start WebRTC media"** — the robot host the server is dialing isn't reachable on `:8443`. By default that host is the hostname from `REACHY_DAEMON_URL`; set `REACHY_ROBOT_HOST=<robot-ip>` if the media plane lives elsewhere, then restart.
 - **`speak()` returns "speech failed: ELEVENLABS_API_KEY"** — set the env var in your MCP config, not just your shell. Claude Desktop launches the server with its own environment.
 - **`snap()` returns "capture failed: no frame"** — the WebRTC video track hasn't started yet. Wait a few seconds after server boot and retry; the daemon negotiates the stream lazily.
 - **Speech sounds pitch-shifted or robotic** — the SDK's output sample rate didn't match the PCM. The server queries `mini.media.get_output_audio_samplerate()` at decode time, so this should self-heal — but if you've pinned an older daemon, upgrade it.

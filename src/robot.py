@@ -15,6 +15,7 @@ import httpx
 import numpy as np
 
 DEFAULT_DAEMON_URL = "http://reachy-mini.local:8000/api"
+DEFAULT_ROBOT_HOST = "reachy-mini.local"
 _AUDIO_CHUNK_SIZE = 960  # 20 ms at 48 kHz, padded to actual rate at runtime
 
 
@@ -186,25 +187,55 @@ _mini: Any = None
 _mini_lock = threading.Lock()
 
 
+def _signalling_host() -> str:
+    """Robot host for WebRTC signalling: REACHY_ROBOT_HOST, else daemon URL hostname."""
+    explicit = os.environ.get("REACHY_ROBOT_HOST")
+    if explicit:
+        return explicit
+    from urllib.parse import urlparse
+
+    return urlparse(daemon_url()).hostname or DEFAULT_ROBOT_HOST
+
+
+class _MediaOnlyMini:
+    """Stand-in for ReachyMini that constructs only a WebRTC MediaManager.
+
+    The full SDK constructor opens a Zenoh client for motor/state pub-sub,
+    which requires multicast scouting on the local network. We talk to the
+    daemon over plain REST instead, so the Zenoh path is unused — but it
+    still gates SDK init. This shim skips Zenoh and goes straight to the
+    media backend, which is independent (it talks WebRTC at :8443).
+    """
+
+    def __init__(self, signalling_host: str, log_level: str = "WARNING") -> None:
+        from reachy_mini.media.media_manager import MediaBackend, MediaManager
+
+        self.media = MediaManager(
+            backend=MediaBackend.WEBRTC,
+            log_level=log_level,
+            use_sim=False,
+            signalling_host=signalling_host,
+        )
+
+    def __exit__(self, *_exc: Any) -> None:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.media.close()
+
+
 def _build_mini() -> Any:
-    """Construct the ReachyMini singleton with WebRTC media backend."""
+    """Construct the media-only SDK shim. Uses WebRTC; skips Zenoh entirely."""
     try:
-        from reachy_mini import ReachyMini
+        import reachy_mini.media.media_manager  # noqa: F401  -- import-time check
     except ImportError as e:
         raise MediaError(f"reachy-mini SDK not installed: {e}") from e
 
-    connection_mode = "network"
-    if os.environ.get("REACHY_LOCALHOST_ONLY"):
-        connection_mode = "localhost_only"
-
+    host = _signalling_host()
     try:
-        return ReachyMini(
-            connection_mode=connection_mode,
-            media_backend="webrtc",
-            log_level="WARNING",
-        )
+        return _MediaOnlyMini(host)
     except Exception as e:
-        raise MediaError(f"failed to connect to robot via SDK: {e}") from e
+        raise MediaError(f"failed to start WebRTC media to {host}:8443: {e}") from e
 
 
 def get_mini() -> Any:
