@@ -17,6 +17,13 @@ import numpy as np
 DEFAULT_DAEMON_URL = "http://reachy-mini.local:8000/api"
 DEFAULT_ROBOT_HOST = "reachy-mini.local"
 _AUDIO_CHUNK_SIZE = 960  # 20 ms at 48 kHz, padded to actual rate at runtime
+_FRAME_WAIT_SECONDS = 8.0  # WebRTC handshake + first keyframe budget
+_FRAME_POLL_INTERVAL = 0.1
+
+# macOS spawns gst-plugin-scanner as a separate binary; SIP strips DYLD_* from
+# its env, so it can't resolve brew's libgobject. Forcing in-process scanning
+# sidesteps the subprocess entirely. Harmless on Linux.
+os.environ.setdefault("GST_REGISTRY_FORK", "no")
 
 
 class RobotError(RuntimeError):
@@ -274,11 +281,25 @@ atexit.register(disconnect)
 
 
 def get_frame_jpeg() -> bytes:
-    """Capture a frame and JPEG-encode it. Returns the encoded bytes."""
+    """Capture a frame and JPEG-encode it. Returns the encoded bytes.
+
+    Polls for up to _FRAME_WAIT_SECONDS to give the WebRTC pipeline time to
+    finish handshake and deliver its first keyframe — get_frame() returns
+    None until then.
+    """
     mini = get_mini()
-    frame = mini.media.get_frame()
+    deadline = time.time() + _FRAME_WAIT_SECONDS
+    frame = None
+    while time.time() < deadline:
+        frame = mini.media.get_frame()
+        if frame is not None:
+            break
+        time.sleep(_FRAME_POLL_INTERVAL)
     if frame is None:
-        raise MediaError("camera returned no frame (is the robot streaming video?)")
+        raise MediaError(
+            "camera returned no frame after "
+            f"{_FRAME_WAIT_SECONDS:.0f}s (is the robot streaming video?)"
+        )
     if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[2] != 3:
         raise MediaError(f"unexpected frame shape: {getattr(frame, 'shape', None)}")
     try:

@@ -55,9 +55,18 @@ Use `discover()` to enumerate them.
 System dependencies first (macOS):
 
 ```bash
-brew install gstreamer gst-plugins-good gst-plugins-bad gst-plugins-ugly \
-             gst-libav gst-plugin-webrtc ffmpeg pkg-config git-lfs
+brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad \
+             gst-plugins-ugly gst-libav gobject-introspection \
+             ffmpeg pkg-config git-lfs
 git lfs install
+```
+
+GStreamer's WebRTC plugin ships inside `gst-plugins-bad`. Then install the
+PyGObject binding into your venv (the `reachy-mini` package only pins it on
+Linux, so macOS has to add it explicitly):
+
+```bash
+uv add pygobject
 ```
 
 Then pick a flow:
@@ -187,7 +196,8 @@ uv run ruff check src tests
 
 ## Troubleshooting
 
-- **`gst-inspect-1.0 webrtc` returns nothing** — the WebRTC plugin pack didn't install. Re-run the brew line above; you need `gst-plugin-webrtc` plus the `bad` plugins.
+- **`gst-inspect-1.0 webrtcbin` returns nothing** — the WebRTC element didn't load. Re-run the brew line above; the WebRTC element ships in `gst-plugins-bad`.
+- **`ModuleNotFoundError: No module named 'gi'`** — PyGObject isn't in the venv. Run `uv add pygobject` after the brew step. If the build fails, make sure `gobject-introspection` and `pkg-config` are installed via brew and that `which pkg-config` resolves to `/opt/homebrew/bin/pkg-config`.
 - **`uv sync` fails on the `reachy-mini` git dependency** — install `git-lfs` and run `git lfs install` once. The reachy-mini repo stores recorded moves under LFS.
 - **`snap()` or `speak()` fails with "failed to start WebRTC media"** — the robot host the server is dialing isn't reachable on `:8443`. By default that host is the hostname from `REACHY_DAEMON_URL`; set `REACHY_ROBOT_HOST=<robot-ip>` if the media plane lives elsewhere, then restart.
 - **`speak()` returns "speech failed: ELEVENLABS_API_KEY"** — set the env var in your MCP config, not just your shell. Claude Desktop launches the server with its own environment.

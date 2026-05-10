@@ -25,6 +25,7 @@ dependencies = [
     "reachy-mini @ git+https://github.com/pollen-robotics/reachy_mini.git@develop",
     "eclipse-zenoh~=1.7.0",
     "python-dotenv>=1.2.2",
+    "pygobject>=3.46.0",
 ]
 
 [project.scripts]
